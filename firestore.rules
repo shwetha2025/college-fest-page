@@ -1,0 +1,37 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.uid in [
+          "GZAQr6sfGQQGSuD48efvG1VdXpD2"
+        ];
+    }
+
+    // Gallery photos: public sees only published ones; only admins write.
+    match /gallery/{photoId} {
+      allow read: if resource.data.published == true || isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasAll([
+          "title", "winner", "college", "imageUrl", "published", "createdAt", "uploadedBy"
+        ])
+        && request.resource.data.title is string
+        && request.resource.data.title.size() <= 100
+        && request.resource.data.imageUrl is string
+        && request.resource.data.imageUrl.matches("^https://res\\.cloudinary\\.com/.*")
+        && request.resource.data.uploadedBy == request.auth.uid;
+      allow update: if isAdmin()
+        && request.resource.data.uploadedBy == resource.data.uploadedBy
+        && request.resource.data.imageUrl == resource.data.imageUrl;
+      allow delete: if isAdmin();
+    }
+
+    // Results, schedule, announcements, college points, individual champion:
+    // everyone can read, only admins can write.
+    match /{coll}/{docId} {
+      allow read: if coll in ["announcements", "schedule", "results", "colleges", "settings"];
+      allow write: if isAdmin()
+        && coll in ["announcements", "schedule", "results", "colleges", "settings"];
+    }
+  }
+}

@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Fest Admin · Kalarav 2026</title>
+<style>
+:root{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#17251f;background:#fffaf0}
+*{box-sizing:border-box}body{margin:0;padding:24px}main{max-width:820px;margin:0 auto}
+h1{color:#0f4a3c}h2{margin:0 0 6px}h3{margin:22px 0 8px}p{line-height:1.5;color:#52645e}
+.card{background:#fff;border:1px solid #d9d6ca;border-radius:16px;padding:22px;margin:18px 0}
+label{display:block;font-weight:650;margin:12px 0 5px;font-size:15px}
+input,select,textarea{width:100%;padding:10px;border:1px solid #c9c9c0;border-radius:8px;font:inherit;background:#fff}
+button{padding:10px 16px;border:0;border-radius:8px;background:#0f4a3c;color:#fff;font-weight:700;cursor:pointer;margin:12px 8px 0 0;font:inherit;font-weight:700}
+button.secondary{background:#e9eee9;color:#17382d}button.danger{background:#a12f25}button:disabled{opacity:.5;cursor:not-allowed}
+.hidden{display:none!important}.status{padding:12px;border-radius:8px;background:#f0f3ee;white-space:pre-wrap;margin-top:14px}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}.tabs button{margin:0;background:#fff;color:#0f4a3c;border:1.5px solid #0f4a3c}
+.tabs button.on{background:#0f4a3c;color:#fff}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0 14px}
+.item{border-top:1px solid #ddd;padding:12px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.item img{width:90px;height:70px;object-fit:cover;border-radius:8px}.item .meta{flex:1;min-width:160px}
+.item strong,.item small{display:block;overflow-wrap:anywhere}.item small{color:#52645e;margin-top:3px}
+.item button{margin:0}a{color:#0f4a3c}.note{font-size:14px;color:#52645e}
+</style>
+</head>
+<body>
+<main>
+  <p><a href="./index.html">← View public site</a></p>
+  <h1>Fest admin</h1>
+
+  <section class="card" id="loginPanel">
+    <h2>Admin sign in</h2>
+    <label for="email">Admin email</label><input id="email" type="email" autocomplete="username">
+    <label for="password">Password</label><input id="password" type="password" autocomplete="current-password">
+    <button id="loginBtn">Sign in</button>
+    <p class="note">Admin accounts are created in Firebase Console → Authentication → Users. There is intentionally no public sign-up.</p>
+  </section>
+
+  <div id="app" class="hidden">
+    <p>Signed in as <strong id="whoami"></strong> <button class="secondary" id="logoutBtn">Sign out</button></p>
+    <div class="tabs" id="tabs">
+      <button data-tab="gallery" class="on">Gallery</button><button data-tab="results">Results</button>
+      <button data-tab="schedule">Schedule</button><button data-tab="announcements">Announcements</button>
+      <button data-tab="champions">Champions</button>
+    </div>
+
+    <section class="card tab" id="tab-gallery">
+      <h2>Gallery photos</h2>
+      <p class="note">Photos with the same event name are grouped into one album on the website.</p>
+      <form id="uploadForm">
+        <label for="photo">Photo file (JPEG, PNG or WebP; big photos are resized automatically)</label>
+        <input id="photo" type="file" accept="image/jpeg,image/png,image/webp" multiple required>
+        <label for="title">Event name (e.g. Classical music)</label>
+        <input id="title" list="eventNames" maxlength="100" required autocomplete="off">
+        <datalist id="eventNames"></datalist>
+        <div class="grid">
+          <div><label for="winner">Winner name (optional)</label><input id="winner" maxlength="100"></div>
+          <div><label for="college">College (optional)</label><input id="college" maxlength="100"></div>
+        </div>
+        <label><input id="publish" type="checkbox" checked style="width:auto"> Publish to public gallery immediately</label>
+        <button id="uploadBtn" type="submit">Upload photo(s)</button>
+      </form>
+      <h3>Albums</h3>
+      <p class="note">Rename an event to fix a typo, or delete a whole album. This changes every photo in the album at once.</p>
+      <div id="albums"><p>Loading…</p></div>
+      <h3>All photos</h3>
+      <div id="items"><p>Loading…</p></div>
+    </section>
+
+    <section class="card tab hidden" id="tab-results"></section>
+    <section class="card tab hidden" id="tab-schedule"></section>
+    <section class="card tab hidden" id="tab-announcements"></section>
+
+    <section class="tab hidden" id="tab-champions">
+      <div class="card">
+        <h2>Individual champion</h2>
+        <form id="champForm"><div class="grid">
+          <div><label for="champName">Name</label><input id="champName" maxlength="100"></div>
+          <div><label for="champCollege">College</label><input id="champCollege" maxlength="100"></div>
+        </div><button type="submit">Save individual champion</button></form>
+      </div>
+      <div class="card" id="sec-colleges"></div>
+    </section>
+
+    <div class="status" id="status" role="status" aria-live="polite">Ready.</div>
+  </div>
+</main>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+import { getFirestore, collection, addDoc, getDocs, getDoc, setDoc, query, orderBy, serverTimestamp, doc, updateDoc, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyD83VzTPfksyf7TemsSOJxsmEhebTIArvk",
+  authDomain: "kalarav-58f7d.firebaseapp.com",
+  projectId: "kalarav-58f7d",
+  storageBucket: "kalarav-58f7d.firebasestorage.app",
+  messagingSenderId: "480315879847",
+  appId: "1:480315879847:web:aced4586a147485b180682"
+};
+/* Photos are stored on Cloudinary (free). Put your cloud name here. */
+const CLOUDINARY = { cloudName: "YOUR_CLOUD_NAME", uploadPreset: "kalarav_gallery" };
+/* UI check only. The Firestore rules are the real security boundary. */
+const ADMIN_UIDS = ["GZAQr6sfGQQGSuD48efvG1VdXpD2"];
+
+const $ = id => document.getElementById(id);
+const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
+let currentUser = null;
+const status = m => { $("status").textContent = m; };
+const isAdmin = u => !!u && ADMIN_UIDS.includes(u.uid);
+const safe = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const ts = x => x.createdAt?.seconds || 0;
+const cloudReady = () => CLOUDINARY.cloudName !== "YOUR_CLOUD_NAME";
+const fmtTime = t => { if (!t) return ""; const [h, m] = t.split(":").map(Number); return ((h + 11) % 12 + 1) + ":" + String(m).padStart(2, "0") + " " + (h < 12 ? "AM" : "PM"); };
+
+/* ---------- sign in / out ---------- */
+$("loginBtn").addEventListener("click", async () => {
+  try { await signInWithEmailAndPassword(auth, $("email").value.trim(), $("password").value); }
+  catch (e) { alert("Sign-in failed: " + e.code + "\n" + e.message); }
+});
+$("logoutBtn").addEventListener("click", () => signOut(auth));
+onAuthStateChanged(auth, async user => {
+  currentUser = user;
+  if (!user) { $("loginPanel").classList.remove("hidden"); $("app").classList.add("hidden"); return; }
+  if (!isAdmin(user)) {
+    const uid = user.uid; await signOut(auth);
+    alert("Signed in, but this account is not on the admin list.\nIts UID is: " + uid + "\nAdd it to ADMIN_UIDS in admin.html and to firestore.rules.");
+    return;
+  }
+  $("loginPanel").classList.add("hidden"); $("app").classList.remove("hidden");
+  $("whoami").textContent = user.email || user.uid;
+  if (!cloudReady()) status("Setup needed: add your Cloudinary cloud name in admin.html before uploading photos.");
+  refreshGallery(); Object.keys(SECTIONS).forEach(loadSection); loadChampion();
+});
+
+/* ---------- tabs ---------- */
+$("tabs").addEventListener("click", e => {
+  const b = e.target.closest("button[data-tab]"); if (!b) return;
+  document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("on", x === b));
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("hidden", t.id !== "tab-" + b.dataset.tab));
+});
+
+/* ---------- generic add / edit / delete sections ---------- */
+/* field: [name, label, type, required] */
+const SECTIONS = {
+  results: { mount: "tab-results", title: "Results", help: "Add the top three for each event. Leave 2nd and 3rd blank if not needed.",
+    fields: [["event","Event name","text",1],["category","Category (Music, Dance…)","text"],["p1Name","1st place – name","text",1],["p1College","1st place – college","text"],["p2Name","2nd place – name","text"],["p2College","2nd place – college","text"],["p3Name","3rd place – name","text"],["p3College","3rd place – college","text"]],
+    sort: (a, b) => ts(b) - ts(a),
+    label: d => `<strong>${safe(d.event)}</strong><small>1st: ${safe(d.p1Name || "-")}${d.p1College ? " · " + safe(d.p1College) : ""}</small>` },
+  schedule: { mount: "tab-schedule", title: "Event schedule", help: "Use the same day label each time (for example Day 1) so events group under one day.",
+    fields: [["day","Day (e.g. Day 1)","text",1],["start","Start time","time",1],["event","Event name","text",1],["stage","Stage / venue","text"],["category","Category","text"]],
+    sort: (a, b) => (a.day || "").localeCompare(b.day || "", undefined, { numeric: true }) || (a.start || "").localeCompare(b.start || ""),
+    label: d => `<strong>${safe(d.event)}</strong><small>${safe(d.day)} · ${safe(fmtTime(d.start))}${d.stage ? " · " + safe(d.stage) : ""}</small>` },
+  announcements: { mount: "tab-announcements", title: "Announcements", help: "Newest announcements appear first on the website.",
+    fields: [["text","Announcement","textarea",1]],
+    sort: (a, b) => ts(b) - ts(a), label: d => `<strong>${safe(d.text)}</strong>` },
+  colleges: { mount: "sec-colleges", title: "College points", help: "Edit a college to update its total points.",
+    fields: [["name","College name","text",1],["points","Total points","number",1]],
+    sort: (a, b) => (b.points || 0) - (a.points || 0), label: d => `<strong>${safe(d.name)}</strong><small>${safe(d.points)} points</small>` }
+};
+const cache = {}, editing = {};
+
+for (const [key, s] of Object.entries(SECTIONS)) {
+  const inputs = s.fields.map(([n, l, t, req]) => {
+    const id = `f-${key}-${n}`;
+    const ctl = t === "textarea" ? `<textarea id="${id}" rows="3" maxlength="500"></textarea>`
+      : `<input id="${id}" type="${t}" ${t === "number" ? 'min="0" step="1"' : 'maxlength="120"'}>`;
+    return `<div><label for="${id}">${l}${req ? " *" : ""}</label>${ctl}</div>`;
+  }).join("");
+  $(s.mount).insertAdjacentHTML("beforeend", `<h2>${s.title}</h2><p class="note">${s.help}</p>
+    <form data-key="${key}"><div class="grid">${inputs}</div>
+      <button type="submit">Add</button><button type="button" class="secondary hidden" data-cancel="${key}">Cancel edit</button></form>
+    <h3>Already added</h3><div id="list-${key}"><p>Loading…</p></div>`);
+}
+
+async function loadSection(key) {
+  const s = SECTIONS[key], area = $("list-" + key);
+  try {
+    const snap = await getDocs(collection(db, key));
+    const items = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort(s.sort);
+    cache[key] = items;
+    area.innerHTML = items.length ? items.map(d => `<div class="item"><div class="meta">${s.label(d)}</div>
+      <button class="secondary" data-act="edit" data-key="${key}" data-id="${safe(d.id)}">Edit</button>
+      <button class="danger" data-act="del" data-key="${key}" data-id="${safe(d.id)}">Delete</button></div>`).join("") : "<p>Nothing added yet.</p>";
+  } catch (e) { area.textContent = "Could not load: " + e.message; }
+}
+
+function resetForm(key) {
+  const f = document.querySelector(`form[data-key="${key}"]`); f.reset();
+  delete editing[key]; f.querySelector('button[type="submit"]').textContent = "Add";
+  f.querySelector("[data-cancel]").classList.add("hidden");
+}
+
+document.addEventListener("submit", async e => {
+  const f = e.target.closest("form[data-key]"); if (!f) return;
+  e.preventDefault();
+  if (!isAdmin(currentUser)) return status("Not authorized.");
+  const key = f.dataset.key, s = SECTIONS[key], data = {};
+  for (const [n, l, t, req] of s.fields) {
+    let v = $(`f-${key}-${n}`).value.trim();
+    if (req && !v) return status(`Please fill in: ${l}`);
+    data[n] = t === "number" ? Number(v || 0) : v;
+  }
+  try {
+    if (editing[key]) { await updateDoc(doc(db, key, editing[key]), data); status("Changes saved."); }
+    else { await addDoc(collection(db, key), { ...data, createdAt: serverTimestamp() }); status("Added."); }
+    resetForm(key); await loadSection(key);
+  } catch (err) { status("Save failed: " + err.message); }
+});
+
+document.addEventListener("click", async e => {
+  const c = e.target.closest("[data-cancel]"); if (c) return resetForm(c.dataset.cancel);
+  const b = e.target.closest("button[data-act]"); if (!b || !isAdmin(currentUser)) return;
+  const { key, id } = b.dataset;
+  if (b.dataset.act === "edit") {
+    const d = cache[key].find(x => x.id === id), f = document.querySelector(`form[data-key="${key}"]`);
+    SECTIONS[key].fields.forEach(([n]) => { $(`f-${key}-${n}`).value = d[n] ?? ""; });
+    editing[key] = id; f.querySelector('button[type="submit"]').textContent = "Save changes";
+    f.querySelector("[data-cancel]").classList.remove("hidden"); f.scrollIntoView({ behavior: "smooth", block: "center" });
+  } else if (b.dataset.act === "del") {
+    if (!confirm("Delete this entry from the website?")) return;
+    try { await deleteDoc(doc(db, key, id)); if (editing[key] === id) resetForm(key); await loadSection(key); status("Deleted."); }
+    catch (err) { status("Delete failed: " + err.message); }
+  }
+});
+
+/* ---------- individual champion ---------- */
+async function loadChampion() {
+  try { const d = await getDoc(doc(db, "settings", "champion"));
+    if (d.exists()) { $("champName").value = d.data().name || ""; $("champCollege").value = d.data().college || ""; } } catch (_) {}
+}
+$("champForm").addEventListener("submit", async e => {
+  e.preventDefault(); if (!isAdmin(currentUser)) return status("Not authorized.");
+  try { await setDoc(doc(db, "settings", "champion"), { name: $("champName").value.trim(), college: $("champCollege").value.trim(), updatedAt: serverTimestamp() });
+    status("Individual champion saved."); } catch (err) { status("Save failed: " + err.message); }
+});
+
+/* ---------- gallery ---------- */
+async function shrink(file, max = 1600) {
+  const bmp = await createImageBitmap(file), s = Math.min(1, max / Math.max(bmp.width, bmp.height));
+  const c = document.createElement("canvas"); c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
+  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+  return await new Promise(r => c.toBlob(r, "image/jpeg", 0.85));
+}
+$("uploadForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!isAdmin(currentUser)) return status("Not authorized.");
+  if (!cloudReady()) return status("Add your Cloudinary cloud name in admin.html first.");
+  const files = [...$("photo").files];
+  if (!files.length) return status("Choose at least one photo.");
+  $("uploadBtn").disabled = true;
+  try {
+    let n = 0;
+    for (const file of files) {
+      if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) throw new Error(file.name + " is not a JPEG, PNG or WebP image.");
+      if (file.size > 25 * 1024 * 1024) throw new Error(file.name + " is over 25 MB.");
+      status(`Uploading ${++n} of ${files.length}…`);
+      const fd = new FormData(); fd.append("file", await shrink(file), "photo.jpg"); fd.append("upload_preset", CLOUDINARY.uploadPreset);
+      const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY.cloudName}/image/upload`, { method: "POST", body: fd });
+      const data = await res.json(); if (!res.ok) throw new Error(data.error?.message || "Cloudinary upload failed");
+      await addDoc(collection(db, "gallery"), {
+        title: $("title").value.trim(), winner: $("winner").value.trim(), college: $("college").value.trim(),
+        imageUrl: data.secure_url.replace("/upload/", "/upload/f_auto,q_auto,w_1000/"), imagePublicId: data.public_id,
+        published: $("publish").checked, createdAt: serverTimestamp(), uploadedBy: currentUser.uid });
+    }
+    status(`${files.length} photo(s) uploaded successfully.`);
+    $("uploadForm").reset(); $("publish").checked = true; await refreshGallery();
+  } catch (e) { status("Upload failed: " + e.message); }
+  finally { $("uploadBtn").disabled = false; }
+});
+
+let albumGroups = [];
+async function refreshGallery() {
+  const area = $("items"); area.innerHTML = "<p>Loading…</p>";
+  try {
+    const snap = await getDocs(query(collection(db, "gallery"), orderBy("createdAt", "desc")));
+    const names = [...new Set(snap.docs.map(d => (d.data().title || "").trim()).filter(Boolean))];
+    $("eventNames").innerHTML = names.map(n => `<option value="${safe(n)}">`).join("");
+    const groups = new Map();
+    snap.docs.forEach(d => { const t = (d.data().title || "").trim() || "Other photos", k = t.toLowerCase();
+      if (!groups.has(k)) groups.set(k, { name: t, ids: [] }); groups.get(k).ids.push(d.id); });
+    albumGroups = [...groups.values()];
+    $("albums").innerHTML = albumGroups.length ? albumGroups.map((g, i) => `<div class="item"><div class="meta"><strong>${safe(g.name)}</strong><small>${g.ids.length} photo${g.ids.length > 1 ? "s" : ""}</small></div>
+      <button class="secondary" data-a="rename" data-i="${i}">Rename</button><button class="danger" data-a="delete" data-i="${i}">Delete album</button></div>`).join("") : "<p>No albums yet.</p>";
+    if (snap.empty) { area.innerHTML = "<p>No photos uploaded yet.</p>"; return; }
+    area.innerHTML = snap.docs.map(d => { const x = d.data(); return `<div class="item">
+      ${x.imageUrl ? `<img src="${safe(x.imageUrl)}" alt="">` : ""}
+      <div class="meta"><strong>${safe(x.title || "Untitled")}</strong>
+      <small>${safe([x.winner, x.college].filter(Boolean).join(" · "))} · ${x.published ? "Published" : "Draft"}</small></div>
+      <button class="secondary" data-g="toggle" data-id="${safe(d.id)}" data-published="${x.published ? "true" : "false"}">${x.published ? "Unpublish" : "Publish"}</button>
+      <button class="danger" data-g="delete" data-id="${safe(d.id)}">Remove</button></div>`; }).join("");
+  } catch (e) { area.textContent = "Could not load photos: " + e.message; }
+}
+async function batchEach(ids, fn) {
+  for (let i = 0; i < ids.length; i += 400) {
+    const batch = writeBatch(db); ids.slice(i, i + 400).forEach(id => fn(batch, doc(db, "gallery", id))); await batch.commit();
+  }
+}
+$("albums").addEventListener("click", async event => {
+  const b = event.target.closest("button[data-a]"); if (!b || !isAdmin(currentUser)) return;
+  const g = albumGroups[+b.dataset.i]; if (!g) return;
+  try {
+    if (b.dataset.a === "rename") {
+      const name = (prompt("New event name for these " + g.ids.length + " photo(s):", g.name) || "").trim().slice(0, 100);
+      if (!name || name === g.name) return;
+      await batchEach(g.ids, (batch, ref) => batch.update(ref, { title: name }));
+      status(`Renamed to "${name}".`);
+    } else {
+      if (!confirm(`Remove the album "${g.name}" and all ${g.ids.length} photo(s) from the website? This cannot be undone.`)) return;
+      await batchEach(g.ids, (batch, ref) => batch.delete(ref));
+      status(`Album "${g.name}" removed. You can also delete the files in Cloudinary to free space.`);
+    }
+    await refreshGallery();
+  } catch (e) { status("Action failed: " + e.message); }
+});
+$("items").addEventListener("click", async event => {
+  const b = event.target.closest("button[data-g]"); if (!b || !isAdmin(currentUser)) return;
+  try {
+    if (b.dataset.g === "toggle") await updateDoc(doc(db, "gallery", b.dataset.id), { published: b.dataset.published !== "true" });
+    else { if (!confirm("Remove this photo from the website?")) return; await deleteDoc(doc(db, "gallery", b.dataset.id)); }
+    await refreshGallery();
+  } catch (e) { status("Action failed: " + e.message); }
+});
+</script>
+</body>
+</html>

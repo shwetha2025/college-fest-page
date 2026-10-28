@@ -1,0 +1,20 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.uid in [
+          "REPLACE_WITH_ADMIN_FIREBASE_AUTH_UID"
+        ];
+    }
+
+    match /winner-photos/{allPaths=**} {
+      // Public can view photos intended for the public gallery; only admins can modify them.
+      allow read: if true;
+      allow create, update: if isAdmin()
+        && request.resource.size < 8 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+      allow delete: if isAdmin();
+    }
+  }
+}
